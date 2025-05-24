@@ -122,13 +122,94 @@ type InferencePool struct {
         metav1.ObjectMeta
         metav1.TypeMeta
 
-        Spec InferencePoolSpec
+        Spec   InferencePoolSpec
+        Status InferencePoolStatus
 }
 
 type InferencePoolSpec struct {
-        // ModelServerSelector uses label selection to watch model server pods
+        // Selector defines a map of labels to watch model server pods
         // that should be included in the InferencePool.
-        ModelServerSelector map[string]string `json:"modelServerSelector,omitempty"`
+        // In some cases, implementations may translate this field to a Service selector, so this matches the simple
+        // map used for Service selectors instead of the full Kubernetes LabelSelector type.
+        // If sepecified, it will be applied to match the model server pods in the same namespace as the InferencePool.
+        // Cross namesoace selector is not supported.
+        Selector map[LabelKey]LabelValue `json:"selector"`
+
+        // TargetPortNumber defines the port number to access the selected model servers.
+        // The number must be in the range 1 to 65535.
+        TargetPortNumber int32 `json:"targetPortNumber"`
+
+        // EndpointPickerConfig specifies the configuration needed by the proxy to discover and connect to the endpoint
+        // picker service that picks endpoints for the requests routed to this pool.
+        EndpointPickerConfig `json:",inline"`
+}
+
+// EndpointPickerConfig specifies the configuration needed by the proxy to discover and connect to the endpoint picker extension.
+// This type is intended to be a union of mutually exclusive configuration options that we may add in the future.
+type EndpointPickerConfig struct {
+        // Extension configures an endpoint picker as an extension service.
+        ExtensionRef *Extension `json:"extensionRef,omitempty"`
+}
+
+// Extension specifies how to configure an extension that runs the endpoint picker.
+type Extension struct {
+      // Reference is a reference to a service extension.
+      ExtensionReference `json:",inline"`
+
+      // ExtensionConnection configures the connection between the gateway and the extension.
+      ExtensionConnection `json:",inline"`
+}
+
+// ExtensionReference is a reference to the extension deployment.
+type ExtensionReference struct {
+      // Group is the group of the referent.
+      // The default value is "", representing the Core API group.
+      Group *Group `json:"group,omitempty"`
+
+      // Kind is the Kubernetes resource kind of the referent. For example
+      // "Service".
+      //
+      // Defaults to "Service" when not specified.
+      //
+      // ExternalName services can refer to CNAME DNS records that may live
+      // outside of the cluster and as such are difficult to reason about in
+      // terms of conformance. They also may not be safe to forward to (see
+      // CVE-2021-25740 for more information). Implementations MUST NOT
+      // support ExternalName Services.
+      Kind *Kind `json:"kind,omitempty"`
+
+      // Name is the name of the referent.
+      Name ObjectName `json:"name"`
+
+      // The port number on the service running the extension. When unspecified,
+      // implementations SHOULD infer a default value of 9002 when the Kind is
+      // Service.
+      PortNumber *PortNumber `json:"portNumber,omitempty"`
+}
+
+// ExtensionConnection encapsulates options that configures the connection to the extension.
+type ExtensionConnection struct {
+      // Configures how the gateway handles the case when the extension is not responsive.
+      // Defaults to failClose.
+      FailureMode *ExtensionFailureMode `json:"failureMode"`
+}
+
+// ExtensionFailureMode defines the options for how the gateway handles the case when the extension is not
+type ExtensionFailureMode string
+
+
+// PoolStatus defines the observed state of InferencePool from a Gateway.
+type PoolStatus struct {
+      // GatewayRef indicates the gateway that observed state of InferencePool.
+      GatewayRef corev1.ObjectReference `json:"parentRef"`
+
+      // Conditions track the state of the InferencePool.
+      //
+      // Known condition types are:
+      //
+      // * "Accepted"
+      // * "ResolvedRefs"
+      Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 ```
 
@@ -225,12 +306,16 @@ type LocalObjectReference struct {
 #### InferencePool(s)
 Here we create a pool that selects the appropriate pods
 ```yaml
-apiVersion: inference.x-k8s.io/v1alpha1
+apiVersion: inference.x-k8s.io/v1alpha2
 kind: InferencePool
 metadata:
   name: base-model-pool
-  modelServerSelector:
-  - app: llm-server
+spec:
+  selector:
+    app: llm-server
+  targetNumber: 8080
+  extensionRef:
+    name: infra-backend-v1-app
 ```
 
 #### InferenceModel
