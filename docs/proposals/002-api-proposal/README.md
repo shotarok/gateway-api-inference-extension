@@ -228,6 +228,7 @@ type InferenceModel struct {
         metav1.TypeMeta
 
         Spec InferenceModelSpec
+        Status InferenceModelStatus
 }
 
 type InferenceModelSpec struct {
@@ -253,8 +254,21 @@ type InferenceModelSpec struct {
         // If not specified, the target model name is defaulted to the ModelName parameter.
         // ModelName is often in reference to a LoRA adapter.
         TargetModels []TargetModel
-        // Reference to the InferencePool that the model registers to. It must exist in the same namespace.
-        PoolReference *LocalObjectReference
+        // PoolRef is a reference to the inference pool, the pool must exist in the same namespace.
+        PoolRef PoolObjectReference
+}
+
+// PoolObjectReference identifies an API object within the namespace of the
+// referrer.
+type PoolObjectReference struct {
+        // Group is the group of the referent.
+        Group Group
+
+        // Kind is kind of the referent. For example "InferencePool".
+        Kind Kind
+
+        // Name is the name of the referent.
+        Name ObjectName
 }
 
 // Defines how important it is to serve the model compared to other models.
@@ -262,13 +276,17 @@ type InferenceModelSpec struct {
 // This allows us to union this with a oneOf field in the future should we wish to adjust/extend this behavior.
 type Criticality string
 const (
-    // Most important. Requests to this band will be shed last.
-    Critical  Criticality = "Critical"
-    // More important than Sheddable, less important than Critical.
-    // Requests in this band will be shed before critical traffic.
-    Default  Criticality = "Default"
-    // Least important. Requests to this band will be shed before all other bands.
-    Sheddable  Criticality = "Sheddable"
+        // Critical defines the highest level of criticality. Requests to this band will be shed last.
+        Critical Criticality = "Critical"
+
+        // Standard defines the base criticality level and is more important than Sheddable but less
+        // important than Critical. Requests in this band will be shed before critical traffic.
+        // Most models are expected to fall within this band.
+        Standard Criticality = "Standard"
+
+        // Sheddable defines the lowest level of criticality. Requests to this band will be shed before
+        // all other bands.
+        Sheddable Criticality = "Sheddable"
  )
 
 // TargetModel represents a deployed model or a LoRA adapter. The
@@ -281,24 +299,16 @@ const (
 type TargetModel struct {
         // The name of the adapter as expected by the ModelServer.
         Name string
-        // Weight is used to determine the percentage of traffic that should be 
+        // Weight is used to determine the percentage of traffic that should be
         // sent to this target model when multiple versions of the model are specified.
-        Weight *int
+        Weight *int32
 }
 
-// LocalObjectReference identifies an API object within the namespace of the
-// referrer.
-type LocalObjectReference struct {
-	// Group is the group of the referent. 
-	Group Group
-
-	// Kind is kind of the referent. For example "InferencePool".
-	Kind Kind
-
-	// Name is the name of the referent.
-	Name ObjectName
+// InferenceModelStatus defines the observed state of InferenceModel
+type InferenceModelStatus struct {
+	// Conditions track the state of the InferenceModel.
+	Conditions []metav1.Condition
 }
-
 ```
 
 ### Yaml Examples
@@ -322,15 +332,16 @@ spec:
 
 Here we consume the pool with two InferenceModels. Where `sql-code-assist` is both the name of the model and the name of the LoRA adapter on the model server. And `npc-bot` has a layer of indirection for those names, as well as a specified criticality. Both `sql-code-assist` and `npc-bot` have available LoRA adapters on the InferencePool and routing to each InferencePool happens earlier (at the K8s Gateway).
 ```yaml
-apiVersion: inference.x-k8s.io/v1alpha1
+apiVersion: inference.x-k8s.io/v1alpha2
 kind: InferenceModel
 metadata:
   name: sql-code-assist
 spec:
   modelName: sql-code-assist
-  poolRef: base-model-pool
+  poolRef:
+    name: base-model-pool
 ---
-apiVersion: inference.x-k8s.io/v1alpha1
+apiVersion: inference.x-k8s.io/v1alpha2
 kind: InferenceModel
 metadata:
   name: npc-bot
@@ -338,11 +349,12 @@ spec:
   modelName: npc-bot
   criticality: Critical
   targetModels:
-    targetModelName: npc-bot-v1
+    - name: npc-bot-v1
       weight: 50
-    targetModelName: npc-bot-v2
-      weight: 50 	
-  poolRef: base-model-pool
+    - name: npc-bot-v2
+      weight: 50
+  poolRef:
+    name: base-model-pool
 ```
 
 
