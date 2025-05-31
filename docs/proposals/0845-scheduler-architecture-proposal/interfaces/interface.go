@@ -36,11 +36,11 @@ type Endpoint struct {
 
 type EndpointState struct {
 	// storage is per Scheduling Cycle, and so has no thread-safe concerns.
-	storage map[string]any
+	storage map[string]any //nolint:unused
 }
 
 type SchedulingResult struct {
-	results map[string][]Endpoint
+	results map[string][]Endpoint //nolint:unused
 }
 
 // Scheduler is the implementation of a... scheduler.
