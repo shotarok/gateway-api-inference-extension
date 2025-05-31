@@ -51,7 +51,7 @@ type Scheduler interface {
 	// - profiles - A subset of the registered scheduling profiles to be ran
 	PreSchedule(request map[string]any, data scheduling.CycleState, results map[string][]Endpoint) map[string]SchedulingProfile
 
-	// PostSchedule recieves the output of the result(s) of the scheduling cycle(s)
+	// PostSchedule receives the output of the result(s) of the scheduling cycle(s)
 	// and makes sense of the data to be consumed by the calling system.
 	// For example: suppose you have 2 profiles ShadowBoxing Profile & Production Profile.
 	// PostSchedule would know to simply log the result of ShadowBoxing
