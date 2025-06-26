@@ -23,8 +23,7 @@ spec:
         - "8000"
         - --max-loras
         - "2"
-        - --lora
-        - food-review-1
+        - --enable-lora
         env:
         - name: POD_NAME
           valueFrom:
@@ -41,3 +40,44 @@ spec:
         resources:
           requests:
             cpu: 10m
+      initContainers:
+        - name: lora-adapter-syncer
+          image: us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/lora-syncer:main
+          imagePullPolicy: Always
+          restartPolicy: Always
+          ports:
+          - containerPort: 8080
+            name: metrics
+            protocol: TCP
+          env:
+          - name: DYNAMIC_LORA_ROLLOUT_CONFIG
+            value: "/config/configmap.yaml"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          volumeMounts:
+          - name: config-volume
+            mountPath: /config
+      volumes:
+      - name: config-volume
+        configMap:
+          name: dynamic-lora-config-sim
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynamic-lora-config-sim
+data:
+  configmap.yaml: |
+    vLLMLoRAConfig:
+      name: food-review-loras
+      defaultBaseModel: meta-llama/Llama-3.1-8B-Instruct
+      ensureExist:
+        models:
+        - id: food-review-1
+          source: test/food-review-lora-1
+        - id: food-review-2
+          source: test/food-review-lora-2
+      ensureNotExist:
+        models: []

@@ -227,6 +227,74 @@ var _ = ginkgo.Describe("InferencePool", func() {
 				return nil
 			}, readyTimeout, curlInterval).Should(gomega.Succeed())
 		})
+
+		ginkgo.It("Should expose metrics from lora-adapter-syncer", func() {
+			podList := &corev1.PodList{}
+			err := cli.List(ctx, podList, client.InNamespace(nsName), client.MatchingLabels{"app": "vllm-llama3-8b-instruct"})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(podList.Items).NotTo(gomega.BeEmpty())
+
+			// Get pod IP for the lora-adapter-syncer container
+			var podIP string
+			for _, pod := range podList.Items {
+				for _, container := range pod.Spec.Containers {
+					if container.Name == "lora-adapter-syncer" {
+						podIP = pod.Status.PodIP
+						break
+					}
+				}
+				if podIP != "" {
+					break
+				}
+			}
+			gomega.Expect(podIP).NotTo(gomega.BeEmpty())
+
+			// Get the authorization token for reading metrics
+			token := ""
+			gomega.Eventually(func() error {
+				token, err = getMetricsReaderToken(cli)
+				if err != nil {
+					return err
+				}
+				if token == "" {
+					return errors.New("token not found")
+				}
+				return nil
+			}, existsTimeout, interval).Should(gomega.Succeed())
+
+			// Construct the metric scraping curl command using Pod IP
+			metricScrapeCmd := []string{
+				"curl",
+				"-i",
+				"--max-time",
+				strconv.Itoa((int)(curlTimeout.Seconds())),
+				"-H",
+				"Authorization: Bearer " + token,
+				fmt.Sprintf("http://%s:%d/metrics", podIP, 8080),
+			}
+
+			expectedMetrics := []string{
+				"lora_adapter_syncer_lora_count",
+				"lora_adapter_syncer_last_sync_timestamp",
+			}
+
+			ginkgo.By("Verifying that lora-adapter-syncer metrics are present")
+			gomega.Eventually(func() error {
+				resp, err := testutils.ExecCommandInPod(ctx, cfg, scheme, kubeCli, nsName, "curl", "curl", metricScrapeCmd)
+				if err != nil {
+					return err
+				}
+				if !strings.Contains(resp, "200 OK") {
+					return fmt.Errorf("did not get 200 OK: %s", resp)
+				}
+				for _, metric := range expectedMetrics {
+					if !strings.Contains(resp, metric) {
+						return fmt.Errorf("expected metric %s not found in metrics output", metric)
+					}
+				}
+				return nil
+			}, readyTimeout, curlInterval).Should(gomega.Succeed())
+		})
 	})
 })
 
